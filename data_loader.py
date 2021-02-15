@@ -14,15 +14,16 @@ from torch.utils.data.sampler import Sampler
 class Utterances(data.Dataset):
     """Dataset class for the Utterances dataset."""
 
-    def __init__(self, root_dir, feat_dir, mode):
+    def __init__(self, root_dir, feat_dir, mode, dataset_type):
         """Initialize and preprocess the Utterances dataset."""
         self.root_dir = root_dir
         self.feat_dir = feat_dir
         self.mode = mode
+        self.dataset_type = dataset_type
         self.step = 20
         self.split = 0
         
-        metaname = os.path.join(self.root_dir, "train.pkl")
+        metaname = os.path.join(self.root_dir, "{}.pkl".format(self.dataset_type))
         meta = pickle.load(open(metaname, "rb"))
         
         manager = Manager()
@@ -79,7 +80,7 @@ class Utterances(data.Dataset):
         
         list_uttrs = dataset[index]
         spk_id_org = list_uttrs[0]
-        emb_org = list_uttrs[1]
+        emb_org = np.squeeze(list_uttrs[1], axis=0)
         
         melsp, f0_org = list_uttrs[2]
         
@@ -104,8 +105,13 @@ class MyCollator(object):
         for token in batch:
             aa, b, c = token
             len_crop = np.random.randint(self.min_len_seq, self.max_len_seq+1, size=2) # 1.5s ~ 3s
-            left = np.random.randint(0, len(aa)-len_crop[0], size=2)
-            pdb.set_trace()
+            # print("len_crop:", len_crop)
+            # print(aa.shape, b.shape, c.shape, len(aa))
+            try:
+                left = np.random.randint(0, len(aa)-len_crop[0], size=2)
+            except:
+                len_crop[0], left = len(aa), [0, 0]
+            # pdb.set_trace()
             
             a = aa[left[0]:left[0]+len_crop[0], :]
             c = c[left[0]:left[0]+len_crop[0]]
@@ -153,10 +159,10 @@ class MultiSampler(Sampler):
     
     
 
-def get_loader(hparams):
+def get_loader(hparams, dataset_type):
     """Build and return a data loader."""
     
-    dataset = Utterances(hparams.root_dir, hparams.feat_dir, hparams.mode)
+    dataset = Utterances(hparams.root_dir, hparams.feat_dir, hparams.mode, dataset_type)
     
     my_collator = MyCollator(hparams)
     

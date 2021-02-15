@@ -377,61 +377,84 @@ class InterpLnr(nn.Module):
         return out_tensor 
     
 
-    def forward(self, x, len_seq):  
+    def forward(self, x, len_seq): # [16, 128, 768], [16,]
         
         if not self.training:
             return x
-        
+        # print("START OF InterpLnr")
         device = x.device
         batch_size = x.size(0)
         
         # indices of each sub segment
         indices = torch.arange(self.max_len_seg*2, device=device)\
                   .unsqueeze(0).expand(batch_size*self.max_num_seg, -1)
+        # print("indices:", indices.shape, indices)
         # scales of each sub segment
         scales = torch.rand(batch_size*self.max_num_seg, 
                             device=device) + 0.5
-        
+        # print("scales:", scales)
         idx_scaled = indices / scales.unsqueeze(-1)
+        # print("idx_scaled:", idx_scaled.shape, idx_scaled)
         idx_scaled_fl = torch.floor(idx_scaled)
+        # print("idx_scaled_fl:", idx_scaled_fl)
+
         lambda_ = idx_scaled - idx_scaled_fl
+        # print("lambda_:", lambda_)
         
         len_seg = torch.randint(low=self.min_len_seg, 
                                 high=self.max_len_seg, 
                                 size=(batch_size*self.max_num_seg,1),
                                 device=device)
-        
+        # print("len_seg:", len_seg.shape, len_seg)
         # end point of each segment
         idx_mask = idx_scaled_fl < (len_seg - 1)
-       
+        # print("idx_mask:", idx_mask.shape, idx_mask)
+        
         offset = len_seg.view(batch_size, -1).cumsum(dim=-1)
+        # print("offset1:", offset.shape, offset)
+        
         # offset starts from the 2nd segment
         offset = F.pad(offset[:, :-1], (1,0), value=0).view(-1, 1)
-        
+        # print("offset2:", offset.shape, offset)        
+
         idx_scaled_org = idx_scaled_fl + offset
+        # print("idx_scaled_org:", idx_scaled_org.shape, idx_scaled_org)
         
         len_seq_rp = torch.repeat_interleave(len_seq, self.max_num_seg)
+        # print("len_seq_rp:", len_seq_rp.shape, len_seq_rp)
         idx_mask_org = idx_scaled_org < (len_seq_rp - 1).unsqueeze(-1)
+        # print("idx_mask_org:", idx_mask_org.shape, idx_mask_org)
         
         idx_mask_final = idx_mask & idx_mask_org
+        # print("idx_mask_final:", idx_mask_final.shape, idx_mask_final)
         
         counts = idx_mask_final.sum(dim=-1).view(batch_size, -1).sum(dim=-1)
+        # print("counts:", counts.shape, counts)
         
         index_1 = torch.repeat_interleave(torch.arange(batch_size, 
                                             device=device), counts)
+        # print("index_1:", index_1.shape, index_1)
         
         index_2_fl = idx_scaled_org[idx_mask_final].long()
         index_2_cl = index_2_fl + 1
+        # print(index_2_fl, index_2_cl)
         
         y_fl = x[index_1, index_2_fl, :]
+        # print("y_fl:", y_fl.shape, y_fl)
         y_cl = x[index_1, index_2_cl, :]
+        # print("y_cl:", y_cl.shape, y_cl)
         lambda_f = lambda_[idx_mask_final].unsqueeze(-1)
+        # print("lambda_f:", lambda_f.shape, lambda_f[:3])
         
         y = (1-lambda_f)*y_fl + lambda_f*y_cl
+        # print("y:", y.shape, y)
         
         sequences = torch.split(y, counts.tolist(), dim=0)
+        # print("sequences:", len(sequences), sequences)
        
         seq_padded = self.pad_sequences(sequences)
+        # print("seq_padded:", seq_padded.shape, seq_padded)
+        # exit(0)
         
         return seq_padded    
  

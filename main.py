@@ -25,10 +25,11 @@ def main(config):
         os.makedirs(config.sample_dir)
 
     # Data loader.
-    vcc_loader = get_loader(hparams)
+    vcc_loader_t = get_loader(hparams, dataset_type="train")
+    vcc_loader_v = get_loader(hparams, dataset_type="val")
     
     # Solver for training
-    solver = Solver(vcc_loader, config, hparams)
+    solver = Solver((vcc_loader_t, vcc_loader_v), config, hparams)
 
     solver.train()
     
