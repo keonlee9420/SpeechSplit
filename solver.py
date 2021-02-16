@@ -168,11 +168,17 @@ class Solver(object):
                         
             # Identity mapping loss
             x_f0 = torch.cat((x_real_org, f0_org), dim=-1)
-            x_f0_intrp = self.Interp(x_f0, len_org) 
+            print("++++++++++++++++++++++++++++++++++++++++ HERE!!!")
+            print("x_f0.shape:", x_f0.shape)
+            x_f0_intrp, x_f0_intrp_len = self.Interp(x_f0, len_org) 
+            print("x_f0_intrp.shape:", x_f0_intrp.shape)
             f0_org_intrp = quantize_f0_torch(x_f0_intrp[:,:,-1])[0]
+            print("f0_org_intrp.shape:", f0_org_intrp.shape)
             x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1)
+            print("x_f0_intrp_org.shape:", x_f0_intrp_org.shape)
+            print("x_real_org.shape:", x_real_org.shape)
             
-            x_identic = self.G(x_f0_intrp_org, x_real_org, emb_org)
+            x_identic = self.G(x_f0_intrp_org, x_real_org, emb_org, x_f0_intrp_len, len_org)
             g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='mean') 
            
             # Backward and optimize.

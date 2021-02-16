@@ -10,6 +10,8 @@ from multiprocessing import Process, Manager
 from torch.utils import data
 from torch.utils.data.sampler import Sampler
 
+from utils import pad_1D, pad_2D
+
 
 class Utterances(data.Dataset):
     """Dataset class for the Utterances dataset."""
@@ -102,34 +104,67 @@ class MyCollator(object):
     def __call__(self, batch):
         # batch[i] is a tuple of __getitem__ outputs
         new_batch = []
-        for token in batch:
-            aa, b, c = token
-            len_crop = np.random.randint(self.min_len_seq, self.max_len_seq+1, size=2) # 1.5s ~ 3s
-            # print("len_crop:", len_crop)
-            # print(aa.shape, b.shape, c.shape, len(aa))
-            try:
-                left = np.random.randint(0, len(aa)-len_crop[0], size=2)
-            except:
-                len_crop[0], left = len(aa), [0, 0]
-            # pdb.set_trace()
+        print(len(batch))
+        print(len(batch[0]))
+        print(len(batch[1]))
+        print(len(batch[2]))
+        print("BEFORE batch[0][0].shape:", batch[0][0].shape)
+        print("BEFORE batch[0][1].shape:", batch[0][1].shape)
+        print("BEFORE batch[0][2].shape:", batch[0][2].shape)
+        # for token in batch:
+        #     aa, b, c = token
+        #     len_crop = np.random.randint(self.min_len_seq, self.max_len_seq+1, size=2) # 1.5s ~ 3s
+        #     # print("len_crop:", len_crop)
+        #     # print(aa.shape, b.shape, c.shape, len(aa))
+        #     try:
+        #         left = np.random.randint(0, len(aa)-len_crop[0], size=2)
+        #     except:
+        #         len_crop[0], left = len(aa), [0, 0]
+        #     # pdb.set_trace()
             
-            a = aa[left[0]:left[0]+len_crop[0], :]
-            c = c[left[0]:left[0]+len_crop[0]]
+        #     a = aa[left[0]:left[0]+len_crop[0], :]
+        #     c = c[left[0]:left[0]+len_crop[0]]
             
-            a = np.clip(a, 0, 1)
+        #     a = np.clip(a, 0, 1)
             
-            a_pad = np.pad(a, ((0,self.max_len_pad-a.shape[0]),(0,0)), 'constant')
-            c_pad = np.pad(c[:,np.newaxis], ((0,self.max_len_pad-c.shape[0]),(0,0)), 'constant', constant_values=-1e10)
+        #     a_pad = np.pad(a, ((0,self.max_len_pad-a.shape[0]),(0,0)), 'constant')
+        #     c_pad = np.pad(c[:,np.newaxis], ((0,self.max_len_pad-c.shape[0]),(0,0)), 'constant', constant_values=-1e10)
             
-            new_batch.append( (a_pad, b, c_pad, len_crop[0]) ) 
+        #     new_batch.append( (a_pad, b, c_pad, len_crop[0]) ) 
             
-        batch = new_batch  
-        
-        a, b, c, d = zip(*batch)
-        melsp = torch.from_numpy(np.stack(a, axis=0))
-        spk_emb = torch.from_numpy(np.stack(b, axis=0))
-        pitch = torch.from_numpy(np.stack(c, axis=0))
-        len_org = torch.from_numpy(np.stack(d, axis=0))
+        # batch = new_batch  
+        # a, b, c, d = zip(*new_batch)
+        # melsp = torch.from_numpy(np.stack(a, axis=0))
+        # spk_emb = torch.from_numpy(np.stack(b, axis=0))
+        # pitch = torch.from_numpy(np.stack(c, axis=0))
+        # len_org = torch.from_numpy(np.stack(d, axis=0))
+        # print("AFTER new_batch[0][0].shape:", new_batch[0][0].shape)
+        # print("AFTER new_batch[0][1].shape:", new_batch[0][1].shape)
+        # print("AFTER new_batch[0][2].shape:", new_batch[0][2].shape)
+        # print("AFTER melsp.shape:", melsp.shape)
+        # print("AFTER spk_emb.shape:", spk_emb.shape)
+        # print("AFTER pitch.shape:", pitch.shape)
+        # print("AFTER len_org.shape:", len_org.shape)
+        # exit(0)
+
+        a = [sb[0] for sb in batch]
+        b = [sb[1] for sb in batch]
+        c = [sb[2] for sb in batch]
+        len_org = np.array(list())
+        for mel in a:
+            len_org = np.append(len_org, mel.shape[0])
+        print("len_org:", len_org)
+        melsp = torch.from_numpy(pad_2D(a))
+        spk_emb = torch.from_numpy(np.array(b))
+        pitch = torch.from_numpy(pad_1D(c)).unsqueeze(-1)
+        len_org = torch.from_numpy(len_org)
+        print("AFTER batch[0][0].shape:", melsp[0].shape)
+        print("AFTER batch[0][1].shape:", spk_emb[0].shape)
+        print("AFTER batch[0][2].shape:", pitch[0].shape)
+        print("AFTER melsp.shape:", melsp.shape)
+        print("AFTER spk_emb.shape:", spk_emb.shape)
+        print("AFTER pitch.shape:", pitch.shape)
+        print("AFTER len_org.shape:", len_org.shape)
         
         return melsp, spk_emb, pitch, len_org
     

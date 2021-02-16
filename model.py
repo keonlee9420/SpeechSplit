@@ -4,8 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 
 from math import ceil 
-from utils import get_mask_from_lengths
+from utils import get_mask_from_lengths, pad_2D, mel_scaler
 
+seq_len = 160 # Dummy data
 
 class LinearNorm(torch.nn.Module):
     def __init__(self, in_dim, out_dim, bias=True, w_init_gain='linear'):
@@ -71,21 +72,29 @@ class Encoder_t(nn.Module):
         self.lstm = nn.LSTM(self.dim_enc_2, self.dim_neck_2, 1, batch_first=True, bidirectional=True)
         
 
-    def forward(self, x, mask):
-                
+    def forward(self, x, len_org, mask):
+        
+        print("\n\nx.shape:", x.shape)
         for conv in self.convolutions:
             x = F.relu(conv(x))
         x = x.transpose(1, 2)
+        x = mel_scaler(x, len_org, len_org.new(len_org.shape).fill_(seq_len))
+        print("\nSCALED x.shape:", x.shape)
         
         self.lstm.flatten_parameters()
         outputs, _ = self.lstm(x)
+        print("outputs.shape:", outputs.shape)
         if mask is not None:
             outputs = outputs * mask
         out_forward = outputs[:, :, :self.dim_neck_2]
         out_backward = outputs[:, :, self.dim_neck_2:]
+        print("out_forward.shape:", out_forward.shape)
+        print("out_backward.shape:", out_backward.shape)
             
         codes = torch.cat((out_forward[:,self.freq_2-1::self.freq_2,:], out_backward[:,::self.freq_2,:]), dim=-1)
-
+        print("out_forward[:,self.freq_2-1::self.freq_2,:].shape:", out_forward[:,self.freq_2-1::self.freq_2,:].shape)
+        print("out_backward[:,::self.freq_2,:].shape:", out_backward[:,::self.freq_2,:].shape)
+        print("codes.shape:", codes.shape)
         return codes        
     
     
@@ -154,7 +163,6 @@ class Encoder_7(nn.Module):
         self.dim_enc_3 = hparams.dim_enc_3
         self.dim_freq = hparams.dim_freq
         self.chs_grp = hparams.chs_grp
-        self.register_buffer('len_org', torch.tensor(hparams.max_len_pad))
         self.dim_neck_3 = hparams.dim_neck_3
         self.dim_f0 = hparams.dim_f0
         
@@ -191,22 +199,22 @@ class Encoder_7(nn.Module):
         self.interp = InterpLnr(hparams)
 
         
-    def forward(self, x_f0):
+    def forward(self, x_f0, x_f0_intrp_len):
         
         x = x_f0[:, :self.dim_freq, :]
         f0 = x_f0[:, self.dim_freq:, :]
         
-        for conv_1, conv_2 in zip(self.convolutions_1, self.convolutions_2):
+        for i, (conv_1, conv_2) in enumerate(zip(self.convolutions_1, self.convolutions_2)):
             x = F.relu(conv_1(x))
             f0 = F.relu(conv_2(f0))
             x_f0 = torch.cat((x, f0), dim=1).transpose(1, 2)
-            x_f0 = self.interp(x_f0, self.len_org.expand(x.size(0)))
+            x_f0, x_f0_intrp_len = self.interp(x_f0, x_f0_intrp_len, scaled=(i == len(self.convolutions_1)-1))
             x_f0 = x_f0.transpose(1, 2)
             x = x_f0[:, :self.dim_enc, :]
             f0 = x_f0[:, self.dim_enc:, :]
             
-            
-        x_f0 = x_f0.transpose(1, 2)    
+        x_f0 = x_f0.transpose(1, 2) 
+        print("x_f0.transpose(1, 2).shape:", x_f0.shape)   
         x = x_f0[:, :, :self.dim_enc]
         f0 = x_f0[:, :, self.dim_enc:]
         
@@ -219,6 +227,7 @@ class Encoder_7(nn.Module):
         
         f0_forward = f0[:, :, :self.dim_neck_3]
         f0_backward = f0[:, :, self.dim_neck_3:]
+        print("x_forward.shape in Encoder_7:", x_forward.shape)
         
         codes_x = torch.cat((x_forward[:,self.freq-1::self.freq,:], 
                              x_backward[:,::self.freq,:]), dim=-1)
@@ -294,20 +303,27 @@ class Generator_3(nn.Module):
         self.freq_3 = hparams.freq_3
 
 
-    def forward(self, x_f0, x_org, c_trg):
+    def forward(self, x_f0, x_org, c_trg, x_f0_intrp_len, len_org):
         
         x_1 = x_f0.transpose(2,1)
-        codes_x, codes_f0 = self.encoder_1(x_1)
+        print("x_f0.shape in Generator_3:", x_f0.shape)
+        codes_x, codes_f0 = self.encoder_1(x_1, x_f0_intrp_len)
         code_exp_1 = codes_x.repeat_interleave(self.freq, dim=1)
         code_exp_3 = codes_f0.repeat_interleave(self.freq_3, dim=1)
         
         x_2 = x_org.transpose(2,1)
-        codes_2 = self.encoder_2(x_2, None)
+        print("code_exp_1.shape, x_2.shape, code_exp_3.shape")
+        print(code_exp_1.shape, x_2.shape, code_exp_3.shape)
+        
+        codes_2 = self.encoder_2(x_2, len_org, None)
         code_exp_2 = codes_2.repeat_interleave(self.freq_2, dim=1)
+        print("code_exp_1.shape, code_exp_2.shape, code_exp_3.shape")
+        print(code_exp_1.shape, code_exp_2.shape, code_exp_3.shape)
         
-        encoder_outputs = torch.cat((code_exp_1, code_exp_2, code_exp_3, 
-                                     c_trg.unsqueeze(1).expand(-1,x_1.size(-1),-1)), dim=-1)
-        
+        encoder_outputs = torch.cat((code_exp_1, code_exp_2, code_exp_3), dim=-1)
+                                     # c_trg.unsqueeze(1).expand(-1,x_1.size(-1),-1)), dim=-1)
+        print("\n\nencoder_outputs.shape:", encoder_outputs.shape)
+        exit(0)
         mel_outputs = self.decoder(encoder_outputs)
         
         return mel_outputs
@@ -356,29 +372,32 @@ class InterpLnr(nn.Module):
     
     def __init__(self, hparams):
         super().__init__()
-        self.max_len_seq = hparams.max_len_seq
-        self.max_len_pad = hparams.max_len_pad
         
         self.min_len_seg = hparams.min_len_seg
         self.max_len_seg = hparams.max_len_seg
-        
-        self.max_num_seg = self.max_len_seq // self.min_len_seg + 1
-        
+        self.max_num_seg = None
+        self.max_len_pad = None
+        self.freq = hparams.freq
         
     def pad_sequences(self, sequences):
         channel_dim = sequences[0].size()[-1]
-        out_dims = (len(sequences), self.max_len_pad, channel_dim)
+        
+        # Padding for the freq bottleneck (division by freq)
+        max_len_pad = (self.max_len_pad//self.freq+1)*self.freq # All hp.freq* should have the same size in the current implementation.
+
+        out_dims = (len(sequences), max_len_pad, channel_dim)
         out_tensor = sequences[0].data.new(*out_dims).fill_(0)
         
         for i, tensor in enumerate(sequences):
             length = tensor.size(0)
-            out_tensor[i, :length, :] = tensor[:self.max_len_pad]
+            out_tensor[i, :length, :] = tensor
             
         return out_tensor 
     
 
-    def forward(self, x, len_seq): # [16, 128, 768], [16,]
-        
+    def forward(self, x, len_seq, scaled=False): # [16, 128, 768], [16,]
+        self.max_num_seg = int(torch.max(len_seq).item()) // self.min_len_seg + 1
+        print("\nself.max_num_seg:", self.max_num_seg)
         if not self.training:
             return x
         # print("START OF InterpLnr")
@@ -428,8 +447,9 @@ class InterpLnr(nn.Module):
         idx_mask_final = idx_mask & idx_mask_org
         # print("idx_mask_final:", idx_mask_final.shape, idx_mask_final)
         
+        print("len_seq:", len_seq.shape, len_seq)
         counts = idx_mask_final.sum(dim=-1).view(batch_size, -1).sum(dim=-1)
-        # print("counts:", counts.shape, counts)
+        print("counts:", counts.shape, counts)
         
         index_1 = torch.repeat_interleave(torch.arange(batch_size, 
                                             device=device), counts)
@@ -451,12 +471,17 @@ class InterpLnr(nn.Module):
         
         sequences = torch.split(y, counts.tolist(), dim=0)
         # print("sequences:", len(sequences), sequences)
-       
+        # print(type(sequences[0]))
+        self.max_len_pad = int(torch.max(counts).item())
+        print("self.max_len_pad:", self.max_len_pad)
         seq_padded = self.pad_sequences(sequences)
-        # print("seq_padded:", seq_padded.shape, seq_padded)
+        print("seq_padded:", seq_padded.shape)
+        if scaled:
+            seq_padded = mel_scaler(seq_padded, counts, counts.new(counts.shape).fill_(seq_len))
+            print("\nSCALED seq_padded:", seq_padded.shape)
         # exit(0)
         
-        return seq_padded    
+        return seq_padded, counts
  
    
    
